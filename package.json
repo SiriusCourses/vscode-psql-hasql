@@ -10,14 +10,59 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:vscode-psql-hasql.helloWorld"
+    "onLanguage:haskell"
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "commands": [
+    "commands": [],
+    "configuration": {
+      "title": "psql-hasql",
+      "properties": {
+        "psql_hasql.dbHost": {
+          "type": "string",
+          "default": "localhost",
+          "markdownDescription": "Database host address."
+        },
+        "psql_hasql.dbPort": {
+          "type": "number",
+          "default": 5432,
+          "markdownDescription": "Database port."
+        },
+        "psql_hasql.dbUser": {
+          "type": "string",
+          "default": "postgres",
+          "markdownDescription": "Database user."
+        },
+        "psql_hasql.dbPassword": {
+          "type": "string",
+          "default": "postgres",
+          "markdownDescription": "Database password."
+        },
+        "psql_hasql.dbName": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "markdownDescription": "Database name."
+        },
+        "psql_hasql.typeCasts": {
+          "type": "object",
+          "default": {},
+          "markdownDescription": "Type casts when expression failed due of query complexity. Use cyrb53 hash and file name to specify the target."
+        }
+      }
+    },
+    "grammars": [
       {
-        "command": "vscode-psql-hasql.helloWorld",
-        "title": "Hello World"
+        "path": "./syntaxes/hasql.json",
+        "scopeName": "hasql.injection",
+        "injectTo": [
+          "source.haskell"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.block.hasql": "postgres"
+        }
       }
     ]
   },
@@ -33,6 +78,7 @@
     "@types/glob": "^7.2.0",
     "@types/mocha": "^9.1.1",
     "@types/node": "16.x",
+    "@types/pg": "^8.6.5",
     "@types/vscode": "^1.68.0",
     "@typescript-eslint/eslint-plugin": "^5.27.0",
     "@typescript-eslint/parser": "^5.27.0",
@@ -41,5 +87,12 @@
     "glob": "^8.0.3",
     "mocha": "^10.0.0",
     "typescript": "^4.7.2"
+  },
+  "extensionDependencies": [
+    "justusadam.language-haskell"
+  ],
+  "dependencies": {
+    "pg": "^8.7.3",
+    "pg-native": "^3.0.0"
   }
 }

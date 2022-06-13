@@ -1,0 +1,9 @@
+{
+    "scopeName": "hasql.injection",
+    "injectionSelector": "L:meta.embedded.block.hasql",
+    "patterns": [
+      {
+            "include": "source.sql"
+      }
+    ]
+}
