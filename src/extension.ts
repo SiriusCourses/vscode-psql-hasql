@@ -141,10 +141,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const activeEditor = vscode.window.activeTextEditor;
     if (activeEditor) { 
-      const
-        curPos = activeEditor.selection.active,
-        document = activeEditor.document,
-        offset = document.offsetAt(curPos);
+      const document = activeEditor.document;
 
       runValidation(
         getSubstitutionsForDocument(document, typeCasts),
@@ -153,36 +150,6 @@ export function activate(context: vscode.ExtensionContext) {
       ).catch(console.error);
     }  
   }).catch(console.error);
-
-  const virtualDocumentContents = new Map<string, string>();
-  const virtualDocumentContentsDidChange = new vscode.EventEmitter<vscode.Uri>();
-
-  vscode.workspace.registerTextDocumentContentProvider('embedded-content', {
-    onDidChange: virtualDocumentContentsDidChange.event,
-    provideTextDocumentContent: uri => {
-      // const originalUri = uri.path.slice(1).slice(0, -4);
-      // const decodedUri = decodeURIComponent(originalUri);
-      return virtualDocumentContents.get(uri.toString());
-    }
-  });
-
-  // const activeEditor = vscode.window.activeTextEditor;
-  // if (activeEditor) { 
-  //   const
-  //     curPos = activeEditor.selection.active,
-  //     offset = activeEditor.document.offsetAt(curPos);
-
-  //   runCheck(activeEditor.document, virtualDocumentContents, virtualDocumentContentsDidChange)
-  //   .map((uri) => {
-  //     const fn = async () => {
-  //       const document = await vscode.workspace.openTextDocument(uri);
-  //       await vscode.languages.setTextDocumentLanguage(document, "postgres");
-  //       console.log(document);
-  //     };
-
-  //     fn().catch(console.error);
-  //   }); 
-  // }
 }
 
 const HASKELL_HASQL = 'hasql\|';
@@ -379,45 +346,10 @@ async function runValidation(
   );
 
   diagnostics.set(document.uri, diagnosticsCurrent);
-  
+
   const correctAmount = result.filter((v) => !!v).length;
 
   log.appendLine(`Expressions correct ${correctAmount}/${result.length}!`);
-}
-
-function runCheck(
-  document: vscode.TextDocument,
-  virtualDocumentContents: Map<string, string>,
-  virtualDocumentContentsDidChange: vscode.EventEmitter<vscode.Uri>
-): ReadonlyArray<vscode.Uri> {
-  const hasqls = getHasqlContent(document);
-
-  const originalUri = document.uri.toString();
-
-  if (hasqls[1]) {
-    return hasqls[0].map((h, i) => {
-      const vdocUriString = `embedded-content://postgres/${encodeURIComponent(originalUri).replace(/\./g, '_dot_')}-${i}.pgsql`;
-      const vdocUri = vscode.Uri.parse(vdocUriString);
-
-      console.log(originalUri, vdocUriString);
-
-      virtualDocumentContents.set(vdocUri.toString(), document.getText(h));
-      virtualDocumentContentsDidChange.fire(vdocUri);
-
-      console.log(i, document.getText(h));
-
-      vscode.commands.executeCommand<vscode.CompletionList>(
-        'vscode.executeCompletionItemProvider',
-        vdocUri,
-        new vscode.Position(0, 0),
-        'k'
-      );
-
-      return vdocUri;
-    });
-  }
-
-  return [];
 }
 
 // this method is called when your extension is deactivated
