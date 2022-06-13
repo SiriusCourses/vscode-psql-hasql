@@ -9,6 +9,14 @@ type TypeCasts = {
   }
 };
 
+type DefaultValues = {
+  [relativePath: string]: {
+    [cyrb53: number]: {
+      [positionalParameter: number]: unknown
+    }
+  }
+};
+
 let pgPool: Pool | null = null;
 
 // See https://stackoverflow.com/a/52171480
@@ -53,12 +61,12 @@ const createPool = async (
   }
 };
 
-function getTypeCastsForDocument(
+function getSubstitutionsForDocument<T extends (TypeCasts | DefaultValues)>(
   document: vscode.TextDocument,
-  casts: TypeCasts
-): TypeCasts[string] {
+  casts: T
+): T[string] {
   const key = vscode.workspace.asRelativePath(document.fileName);
-  return Object.assign({}, casts[key] ?? {});
+  return Object.assign({}, casts[key] ?? {}) as any;
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -70,21 +78,32 @@ export function activate(context: vscode.ExtensionContext) {
 
   const configuration = vscode.workspace.getConfiguration('psql_hasql');
 
-  let typeCasts: TypeCasts = configuration.get('typeCasts') || {};
+  let 
+    typeCasts: TypeCasts = configuration.get('typeCasts') || {},
+    defaultValues: TypeCasts = configuration.get('defaultValues') || {};
 
   createPool(configuration, log).then((pool) => {
     context.subscriptions.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (!e.affectsConfiguration('psql_hasql.typeCasts')) { return; }  
+        if (
+            !e.affectsConfiguration('psql_hasql.typeCasts')
+            &&
+            !e.affectsConfiguration('psql_hasql.defaultValues')
+            ) { return; }  
         const updatedConfiguration = vscode.workspace.getConfiguration('psql_hasql');
         typeCasts = updatedConfiguration.get('typeCasts') ?? {};
+        defaultValues = updatedConfiguration.get('defaultValues') ?? {};
 
         diagnostics.forEach((uri) => {
           const fn = async () => {
             const 
               document = await vscode.workspace.openTextDocument(uri);
 
-            return runValidation(getTypeCastsForDocument(document, typeCasts), document, log, pool, diagnostics);
+            return runValidation(
+              getSubstitutionsForDocument(document, typeCasts),
+              getSubstitutionsForDocument(document, defaultValues), 
+              document, log, pool, diagnostics
+            );
           };
 
           fn().catch(console.error);
@@ -95,14 +114,22 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
       vscode.workspace.onDidOpenTextDocument((document) => {
         if (document.languageId === 'haskell') {
-          runValidation(getTypeCastsForDocument(document, typeCasts), document, log, pool, diagnostics).catch(console.error);
+          runValidation(
+            getSubstitutionsForDocument(document, typeCasts),
+            getSubstitutionsForDocument(document, defaultValues), 
+            document, log, pool, diagnostics
+          ).catch(console.error);
         }
       })
     );
   
     context.subscriptions.push(
       vscode.workspace.onDidSaveTextDocument((document) => {
-        runValidation(getTypeCastsForDocument(document, typeCasts), document, log, pool, diagnostics).catch(console.error);
+        runValidation(
+          getSubstitutionsForDocument(document, typeCasts),
+          getSubstitutionsForDocument(document, defaultValues), 
+          document, log, pool, diagnostics
+        ).catch(console.error);
       })
     );
   
@@ -119,7 +146,11 @@ export function activate(context: vscode.ExtensionContext) {
         document = activeEditor.document,
         offset = document.offsetAt(curPos);
 
-      runValidation(getTypeCastsForDocument(document, typeCasts), document, log, pool, diagnostics).catch(console.error);
+      runValidation(
+        getSubstitutionsForDocument(document, typeCasts),
+        getSubstitutionsForDocument(document, defaultValues), 
+        document, log, pool, diagnostics
+      ).catch(console.error);
     }  
   }).catch(console.error);
 
@@ -254,6 +285,7 @@ async function runSyntaxCheck(
 
 async function runExplainCheck(
   predefinedTypes: TypeCasts[string][number],
+  predefinedValues: DefaultValues[string][number],
   expression: string,
   expressionHash: number,
   range: vscode.Range,
@@ -264,16 +296,24 @@ async function runExplainCheck(
     [testExpression, { line }] = wrapExpressionInExplainCheck(expression),
     hostLine = range.start.line + line,
     parameters = (new Set([...expression.matchAll(/(\$[1-9][0-9]*)/g)].map((found) => found[0]))).size,
-    parameterValues = Array(parameters).fill(null),
+    parameterValues = Array(parameters)
+      .fill(null)
+      .map((v, i) => {
+        if (predefinedValues[i+1]) { return predefinedValues[i+1]; }
+        return v;
+      }),
     knownTypes = Object.keys(predefinedTypes),
     actualQuery = knownTypes.reduce((acc, v: string) => {
       const position = parseInt(v);
-      console.log(position, predefinedTypes[position]);
       return acc.replace(new RegExp(`\\$${position}`, "gm"), `$${position}::${predefinedTypes[position]}`);
     }, testExpression);
 
   if (knownTypes.length > 0) {
     log.appendLine(`Script line ${hostLine} has types substitutions, its origin query will be changed`);
+  }
+
+  if (Object.keys(predefinedValues).length > 0) {
+    log.appendLine(`Script line ${hostLine} has default values, "null" value will be replaced with provided ones: ${JSON.stringify(parameterValues)}`);
   }
 
   log.appendLine(`Validation script for line ${hostLine} expression (${expressionHash}) is \n---\n${actualQuery}\n===\n`);
@@ -289,6 +329,7 @@ async function runExplainCheck(
 
 async function runValidation(
   typeCasts: TypeCasts[string],
+  defaultValues: DefaultValues[string],
   document: vscode.TextDocument,
   log: vscode.OutputChannel,
   pool: Pool,
@@ -313,8 +354,9 @@ async function runValidation(
         expressionEssential = expression.replace(/(\r\n|\n|\r)/gm, "").replace(/\s/g, '').trim().toLocaleLowerCase(),
         expressionHash = cyrb53(expressionEssential),
         expressionTypeCasts = typeCasts[expressionHash] ?? {},
+        expressionDefaultValues = defaultValues[expressionHash] ?? {},
         syntaxError = await runSyntaxCheck(expression, expressionHash, h, log, pool),
-        explainError = await runExplainCheck(expressionTypeCasts, expression, expressionHash, h, log, pool);
+        explainError = await runExplainCheck(expressionTypeCasts, expressionDefaultValues, expression, expressionHash, h, log, pool);
 
         log.appendLine(`Hash ${expressionHash} generated for query at line ${h.start.line}: ${expressionEssential}!`);
 
@@ -336,6 +378,8 @@ async function runValidation(
     })
   );
 
+  diagnostics.set(document.uri, diagnosticsCurrent);
+  
   const correctAmount = result.filter((v) => !!v).length;
 
   log.appendLine(`Expressions correct ${correctAmount}/${result.length}!`);
