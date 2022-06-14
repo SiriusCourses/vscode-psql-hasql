@@ -286,7 +286,11 @@ async function runExplainCheck(
   log.appendLine(`Validation script for line ${hostLine} expression (${expressionHash}) is \n---\n${actualQuery}\n===\n`);
 
   try {
-    await pool.query(actualQuery, parameterValues);
+    await pool.query({
+      name: `${hostLine}-${expressionHash}`,
+      text: actualQuery, 
+      values: parameterValues
+    });
     
     return null;
   } catch (e: unknown) {
