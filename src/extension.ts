@@ -188,7 +188,7 @@ const normalizeEnding = (v: string): string => {
   return trimmed + (isEnded ? '' : ';');
 };
 
-const wrapExpressionInExplainCheck = (v: string, types: ReadonlyArray<string>): readonly [string, vscode.Position] => {
+const wrapExpressionInPrepareCheck = (v: string, types: ReadonlyArray<string>): readonly [string, vscode.Position] => {
   const 
     isMultiLine = v.includes('\n'),
     normalized = normalizeEnding(v),
@@ -200,7 +200,7 @@ ${normalized}
 `.trim(), new vscode.Position(1 + (isMultiLine ? 1 : 0), 0)] as const;
 };
 
-async function runExplainCheck(
+async function runPrepareCheck(
   predefinedTypes: TypeCasts[string][number],
   expression: string,
   expressionHash: number,
@@ -217,7 +217,7 @@ async function runExplainCheck(
         return v;
       }),
     knownTypes = Object.keys(predefinedTypes),
-    [testExpression, { line }] = wrapExpressionInExplainCheck(expression, parameterValues),
+    [testExpression, { line }] = wrapExpressionInPrepareCheck(expression, parameterValues),
     hostLine = range.start.line + line;
 
   if (knownTypes.length > 0) {
@@ -261,22 +261,18 @@ async function runValidation(
         expressionEssential = expression.replace(/(\r\n|\n|\r)/gm, "").replace(/\s/g, '').trim().toLocaleLowerCase(),
         expressionHash = cyrb53(expressionEssential),
         expressionTypeCasts = typeCasts[expressionHash] ?? {},
-        syntaxError = null,
-        explainError = await runExplainCheck(expressionTypeCasts, expression, expressionHash, h, log, pool);
+        prepareError = await runPrepareCheck(expressionTypeCasts, expression, expressionHash, h, log, pool);
 
         log.appendLine(`Hash ${expressionHash} generated for query at line ${h.start.line}: ${expressionEssential}!`);
 
-      if (!syntaxError && !explainError) {
+      if (!prepareError) {
         return true;
       }
 
-      // Only one error might happen at one time
-      const actualError = (syntaxError || explainError)!; 
-
       diagnosticsCurrent.push(new vscode.Diagnostic(h, [
         `Query cyrb53 hash: ${expressionHash}`,
-        actualError.message,
-        actualError.hint
+        prepareError.message,
+        prepareError.hint
       ].filter((v) => !!v).join('\n')));
 
       diagnostics.set(document.uri, diagnosticsCurrent);
