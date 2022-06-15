@@ -50,11 +50,6 @@
           "type": "object",
           "default": {},
           "markdownDescription": "Type casts when expression failed due of query complexity. Use cyrb53 hash and file name to specify the target."
-        },
-        "psql_hasql.defaultValues": {
-          "type": "object",
-          "default": {},
-          "markdownDescription": "Default values when expression failed due of query complexity. Use cyrb53 hash and file name to specify the target."
         }
       }
     },

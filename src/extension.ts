@@ -9,14 +9,6 @@ type TypeCasts = {
   }
 };
 
-type DefaultValues = {
-  [relativePath: string]: {
-    [cyrb53: number]: {
-      [positionalParameter: number]: unknown
-    }
-  }
-};
-
 let pgPool: Pool | null = null;
 
 // See https://stackoverflow.com/a/52171480
@@ -61,7 +53,7 @@ const createPool = async (
   }
 };
 
-function getSubstitutionsForDocument<T extends (TypeCasts | DefaultValues)>(
+function getSubstitutionsForDocument<T extends TypeCasts>(
   document: vscode.TextDocument,
   casts: T
 ): T[string] {
@@ -79,20 +71,14 @@ export function activate(context: vscode.ExtensionContext) {
   const configuration = vscode.workspace.getConfiguration('psql_hasql');
 
   let 
-    typeCasts: TypeCasts = configuration.get('typeCasts') || {},
-    defaultValues: TypeCasts = configuration.get('defaultValues') || {};
+    typeCasts: TypeCasts = configuration.get('typeCasts') || {};
 
   createPool(configuration, log).then((pool) => {
     context.subscriptions.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (
-            !e.affectsConfiguration('psql_hasql.typeCasts')
-            &&
-            !e.affectsConfiguration('psql_hasql.defaultValues')
-            ) { return; }  
+        if (!e.affectsConfiguration('psql_hasql.typeCasts')) { return; }  
         const updatedConfiguration = vscode.workspace.getConfiguration('psql_hasql');
         typeCasts = updatedConfiguration.get('typeCasts') ?? {};
-        defaultValues = updatedConfiguration.get('defaultValues') ?? {};
 
         diagnostics.forEach((uri) => {
           const fn = async () => {
@@ -101,7 +87,6 @@ export function activate(context: vscode.ExtensionContext) {
 
             return runValidation(
               getSubstitutionsForDocument(document, typeCasts),
-              getSubstitutionsForDocument(document, defaultValues), 
               document, log, pool, diagnostics
             );
           };
@@ -116,7 +101,6 @@ export function activate(context: vscode.ExtensionContext) {
         if (document.languageId === 'haskell') {
           runValidation(
             getSubstitutionsForDocument(document, typeCasts),
-            getSubstitutionsForDocument(document, defaultValues), 
             document, log, pool, diagnostics
           ).catch(console.error);
         }
@@ -127,7 +111,6 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.workspace.onDidSaveTextDocument((document) => {
         runValidation(
           getSubstitutionsForDocument(document, typeCasts),
-          getSubstitutionsForDocument(document, defaultValues), 
           document, log, pool, diagnostics
         ).catch(console.error);
       })
@@ -145,7 +128,6 @@ export function activate(context: vscode.ExtensionContext) {
 
       runValidation(
         getSubstitutionsForDocument(document, typeCasts),
-        getSubstitutionsForDocument(document, defaultValues), 
         document, log, pool, diagnostics
       ).catch(console.error);
     }  
@@ -217,13 +199,14 @@ END; $SYNTAX_CHECK$;
 `.trim(), new vscode.Position(1 + (isMultiLine ? 1 : 0), 0)] as const;
 };
 
-const wrapExpressionInExplainCheck = (v: string): readonly [string, vscode.Position] => {
+const wrapExpressionInExplainCheck = (v: string, types: ReadonlyArray<string>): readonly [string, vscode.Position] => {
   const 
     isMultiLine = v.includes('\n'),
-    normalized = normalizeEnding(v);
+    normalized = normalizeEnding(v),
+    typesInPrepare = types.length === 0 ? 'q' : `q(${types.join(', ')})`;
 
   return [`
-EXPLAIN
+DEALLOCATE ALL; PREPARE ${typesInPrepare} AS
 ${normalized}
 `.trim(), new vscode.Position(1 + (isMultiLine ? 1 : 0), 0)] as const;
 };
@@ -252,7 +235,6 @@ async function runSyntaxCheck(
 
 async function runExplainCheck(
   predefinedTypes: TypeCasts[string][number],
-  predefinedValues: DefaultValues[string][number],
   expression: string,
   expressionHash: number,
   range: vscode.Range,
@@ -260,37 +242,25 @@ async function runExplainCheck(
   pool: Pool
 ): Promise<DatabaseError | null> {
   const 
-    [testExpression, { line }] = wrapExpressionInExplainCheck(expression),
-    hostLine = range.start.line + line,
     parameters = (new Set([...expression.matchAll(/(\$[1-9][0-9]*)/g)].map((found) => found[0]))).size,
     parameterValues = Array(parameters)
-      .fill(null)
+      .fill('unknown')
       .map((v, i) => {
-        if (predefinedValues[i+1]) { return predefinedValues[i+1]; }
+        if (predefinedTypes[i+1]) { return predefinedTypes[i+1]; }
         return v;
       }),
     knownTypes = Object.keys(predefinedTypes),
-    actualQuery = knownTypes.reduce((acc, v: string) => {
-      const position = parseInt(v);
-      return acc.replace(new RegExp(`\\$${position}`, "gm"), `$${position}::${predefinedTypes[position]}`);
-    }, testExpression);
+    [testExpression, { line }] = wrapExpressionInExplainCheck(expression, parameterValues),
+    hostLine = range.start.line + line;
 
   if (knownTypes.length > 0) {
     log.appendLine(`Script line ${hostLine} has types substitutions, its origin query will be changed`);
   }
 
-  if (Object.keys(predefinedValues).length > 0) {
-    log.appendLine(`Script line ${hostLine} has default values, "null" value will be replaced with provided ones: ${JSON.stringify(parameterValues)}`);
-  }
-
-  log.appendLine(`Validation script for line ${hostLine} expression (${expressionHash}) is \n---\n${actualQuery}\n===\n`);
+  log.appendLine(`Validation script for line ${hostLine} expression (${expressionHash}) is \n---\n${testExpression}\n===\n`);
 
   try {
-    await pool.query({
-      name: `${hostLine}-${expressionHash}`,
-      text: actualQuery, 
-      values: parameterValues
-    });
+    await pool.query(testExpression);
     
     return null;
   } catch (e: unknown) {
@@ -300,7 +270,6 @@ async function runExplainCheck(
 
 async function runValidation(
   typeCasts: TypeCasts[string],
-  defaultValues: DefaultValues[string],
   document: vscode.TextDocument,
   log: vscode.OutputChannel,
   pool: Pool,
@@ -325,9 +294,8 @@ async function runValidation(
         expressionEssential = expression.replace(/(\r\n|\n|\r)/gm, "").replace(/\s/g, '').trim().toLocaleLowerCase(),
         expressionHash = cyrb53(expressionEssential),
         expressionTypeCasts = typeCasts[expressionHash] ?? {},
-        expressionDefaultValues = defaultValues[expressionHash] ?? {},
-        syntaxError = await runSyntaxCheck(expression, expressionHash, h, log, pool),
-        explainError = await runExplainCheck(expressionTypeCasts, expressionDefaultValues, expression, expressionHash, h, log, pool);
+        syntaxError = null,
+        explainError = await runExplainCheck(expressionTypeCasts, expression, expressionHash, h, log, pool);
 
         log.appendLine(`Hash ${expressionHash} generated for query at line ${h.start.line}: ${expressionEssential}!`);
 
