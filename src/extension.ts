@@ -211,28 +211,6 @@ ${normalized}
 `.trim(), new vscode.Position(1 + (isMultiLine ? 1 : 0), 0)] as const;
 };
 
-async function runSyntaxCheck(
-  expression: string,
-  expressionHash: number,
-  range: vscode.Range,
-  log: vscode.OutputChannel,
-  pool: Pool
-): Promise<DatabaseError | null> {
-  const 
-    [testExpression, { line }] = wrapExpressionInSyntaxCheck(expression),
-    hostLine = range.start.line + line;
-  
-  log.appendLine(`Validation script for line ${hostLine} expression (${expressionHash}) is \n---\n${testExpression}\n===\n`);
-
-  try {
-    await pool.query(testExpression);
-
-    return null;
-  } catch (e: unknown) {
-    return e as DatabaseError;
-  }
-}
-
 async function runExplainCheck(
   predefinedTypes: TypeCasts[string][number],
   expression: string,
