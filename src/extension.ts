@@ -188,17 +188,6 @@ const normalizeEnding = (v: string): string => {
   return trimmed + (isEnded ? '' : ';');
 };
 
-const wrapExpressionInSyntaxCheck = (v: string): readonly [string, vscode.Position] => {
-  const 
-    isMultiLine = v.includes('\n'),
-    normalized = normalizeEnding(v);
-
-  return [`DO $SYNTAX_CHECK$ BEGIN RETURN;
-${normalized}
-END; $SYNTAX_CHECK$;
-`.trim(), new vscode.Position(1 + (isMultiLine ? 1 : 0), 0)] as const;
-};
-
 const wrapExpressionInExplainCheck = (v: string, types: ReadonlyArray<string>): readonly [string, vscode.Position] => {
   const 
     isMultiLine = v.includes('\n'),
