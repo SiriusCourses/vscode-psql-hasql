@@ -6,6 +6,10 @@
   "engines": {
     "vscode": "^1.68.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cheopslab/vscode-psql-hasql.git"   
+  },
   "categories": [
     "Other"
   ],
